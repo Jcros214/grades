@@ -326,6 +326,21 @@ class User:
 		plt.legend(loc='lower left')
 		plt.show()
 
+		import base64
+		from io import BytesIO
+
+		buf = BytesIO()
+		plt.gcf().set_figheight(8)
+		plt.gcf().set_figwidth(15)
+
+		plt.savefig(buf, format="png")
+		# Embed the result in the html output.
+		data = base64.b64encode(buf.getbuffer()).decode("ascii")
+		return f"<img style='display: block; margin-left: auto; margin-right: auto' src='data:image/png;base64,{data}'/>"
+
+
+
+
 	# Depreciated
 	# def googleSheet(self, Class):
 	# 	# define the scope
