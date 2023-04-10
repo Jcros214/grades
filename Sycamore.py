@@ -11,6 +11,9 @@ import datetime
 import pandas as pd
 # from oauth2client.service_account import ServiceAccountCredentials
 from typing import Dict
+import json
+import os
+from decimal import Decimal, InvalidOperation
 
 days = pd.date_range(datetime.date(2023, 1, 5), end=datetime.date.today()).to_pydatetime().tolist()
 days: list[datetime.date]
@@ -21,17 +24,18 @@ rootURL = 'https://app.sycamoreschool.com'
 class Day:
 	def __init__(self, date: datetime.date) -> None:
 		self.date = date
-		self.earned = 0
-		self.possible = 0
-		self.runningScore = 0
-		self.runningWeight = 0
+		self.earned = Decimal(0)
+		self.possible = Decimal(0)
+		self.runningScore = Decimal(0)
+		self.runningWeight = Decimal(0)
 
 class Assignment:
 	def __init__(self, name, earned, possible, date):
 		self.name = name
 		self.date = datetime.datetime.strptime(date, r'%m/%d/%y')
-		self.earned = earned
-		self.possible = possible
+		self.earned = Decimal(earned)
+		self.possible = Decimal(possible)
+
 		self.score = self.earned/self.possible
 
 	def __repr__(self) -> str:
@@ -41,13 +45,13 @@ class Section:
 	def __init__(self, data: list[Assignment], weight, name) -> None:
 		self.data = data
 		self.name = name
-		self.earned = 0
-		self.possible = 0
+		self.earned = Decimal(0)
+		self.possible = Decimal(0)
 
 		self.weightByDay = []
 
-		self.weight = weight
-		self.adjWeight = weight
+		self.weight = Decimal(weight)
+		self.adjWeight = Decimal(weight)
 
 		self.value = self.sectionAverage()
 
@@ -62,8 +66,8 @@ class Section:
 			self.timeline[assignment.date].possible += assignment.possible
 		
 
-		runningEarned = 0
-		runningPossible = 0
+		runningEarned = Decimal(0)
+		runningPossible = Decimal(0)
 
 		for day in days:
 			for assignment in self.data:
@@ -83,9 +87,9 @@ class Section:
 
 	def sectionAverage(self):
 		for assignment in self.data:
-			self.earned += assignment.earned
-			self.possible += assignment.possible
-		return (self.earned/self.possible)*self.weight
+			self.earned += Decimal(assignment.earned)
+			self.possible += Decimal(assignment.possible)
+		return Decimal((self.earned/self.possible) * self.weight)
 	
 	def sectionAverageAtDay(self, day):
 		return self.timeline[day].runningScore
@@ -112,12 +116,12 @@ class Course:
 		self.sections: list[Section]
 		self.sectionDFs = []
 		self.df = pd.DataFrame(index=days)
-		self.average = 0
-		self.earnedWeight = 0
+		self.average = Decimal(0)
+		self.earnedWeight = Decimal(0)
 
 
 		self.splitIntoSections()
-		self.earnedWeight = sum([section.weight for section in self.sections])
+		self.earnedWeight = Decimal(sum([section.weight for section in self.sections]))
 		self.get_average()
 
 		for day in days:
@@ -129,10 +133,10 @@ class Course:
 				sectionWeights.append(section.weightAtDay(day))
 
 
-			simpleAverage = sum([avg*weight for avg, weight in zip(sectionAverages, sectionWeights)])
+			simpleAverage = Decimal(sum([avg*weight for avg, weight in zip(sectionAverages, sectionWeights)]))
 			try:
-				dailyaverage = simpleAverage/sum(sectionWeights)
-			except ZeroDivisionError:
+				dailyaverage = simpleAverage / Decimal(sum(sectionWeights))
+			except (ZeroDivisionError, InvalidOperation) :
 				dailyaverage = None
 				
 			# dailyaverage = sum([avg*weight for avg, weight in zip(sectionAverages, sectionWeights)])/sum(sectionWeights)
@@ -178,7 +182,7 @@ class Course:
 		for row in self.data:
 			if type(row[-1]) is str:
 				try:
-					sectWeights[len(sectWeights)] = float(row[-1][:-2])/100, row[1]
+					sectWeights[len(sectWeights)] = Decimal(row[-1][:-2])/100, row[1]
 				except ValueError:
 					pass
 		del(row)
@@ -194,16 +198,38 @@ class Course:
 			isAssignment = True
 			isSection = True
 
-			corrTypeAssignment = [[float], [str], [str], [float], [float], [str], [str], [str], [str, float]]
+			try:
+				if type(assignment[8]) is str:
+					assignment[8]: str
+					if str(assignment[8]).find('%') != -1:
+						isAssignment = False
+						isSection = True
+					else:
+						raise ValueError("This is a bug.")
+				else:
+					isAssignment = True
+					isSection = False
+			except AttributeError:
+				isAssignment = True
+				isSection = False
+				
+
+			corrTypeAssignment = [[float, str], [str], [str], [float], [float], [str], [str], [str], [str, float]]
+			corrTypeSection = [[str], [str], [str], [float], [float], [str], [str], [str], [str]]
+			corrTypeSection = [[str], [str], [str], [float], [float], [str], [str], [str], [str]]
+
 			for index, val in enumerate(assignment):
 				if not type(val) in corrTypeAssignment[index]:
 					isAssignment = False
 
-			corrTypeSection = [[str], [str], [str], [float], [float], [str], [str], [str], [str]]
 			
 			for index, val in enumerate(assignment):
 				if not type(val) in corrTypeSection[index]:
 					isSection = False
+
+
+			if assignment[0] == assignment[1] == assignment[2]:
+				isAssignment = False
 			
 			if isAssignment and isSection:
 				raise ValueError("This is a bug.")
@@ -216,7 +242,7 @@ class Course:
 				outlist += [curSection]
 				curSection = []
 			else:
-				# print(f"Subsection header? {assignment}")
+				print(f"Subsection header? {assignment}")
 				pass
 
 		outlist += [curSection]
@@ -229,7 +255,10 @@ class Course:
 	def get_average(self):
 		for section in self.sections:
 			self.average += ((section.earned/section.possible))*(section.weight)
-		self.average = (self.average/self.earnedWeight)
+		try:
+			self.average = (self.average/self.earnedWeight)
+		except InvalidOperation:
+			self.average = 0
 
 
 class User:
@@ -256,6 +285,18 @@ class User:
 		# if(self.useSheets):
 		# 	for userClass in self.classes:
 		# 		self.googleSheet(userClass)
+		self.toJSON()
+	
+	def toJSON(self):
+		ctr = 0
+
+		while f"{datetime.date.today()}{('-'+str(ctr)) if ctr else '' }" in os.listdir(f'data/{self.username}/'):
+			ctr += 1
+
+		filename = f"{datetime.date.today()}{('-'+str(ctr)) if ctr else '' }"
+
+		# with open(filename, 'w') as f:
+			# f.write(json.dumps(self, default=lambda o: o.__dict__ , sort_keys=True, indent=4))
 
 	# get classIDs and classNames, and store as Class in self.classes
 	def getClasses(self, r: str):
@@ -393,7 +434,7 @@ class User:
 
 		plt.title("Grades over Semester")
 		plt.xlabel('Date')
-		plt.ylim(ymin-.03, 1.03)
+		plt.ylim(float(ymin)-.03, 1.03)
 
 		tickNums =  [.595,.625,.675,.695,.725,.775,.795,.825,.875,.895,.925,.975,1 ]
 		tickNames = ['D-','D' ,'D+','C-','C' ,'C+','B-','B' ,'B+','A-','A' ,'A+','']
@@ -403,7 +444,7 @@ class User:
 		plt.hlines(tickNums, days[0], days[-1], '0')
 		plt.ylabel('Grade')
 		plt.legend(loc='lower left')
-		# plt.show()
+		plt.show()
 
 
 		"TODO: get agragate average"
